@@ -1,0 +1,22 @@
+{
+    "users": [
+        {
+            "user_id": "CM001",
+            "password": "$2b$12$w8D/Bn39u/1OPIyFY7zxze/H98.giszke2aF/pAqGkatV28wipqiC",
+            "name": "Hemz",
+            "role": "Care Manager"
+        },
+        {
+            "user_id": "2345",
+            "password": "$2b$12$JwGgdDXd1uvz8aADSzaGkuHXBBRRIZuuJ7bb/h4hZ45EJW9lHCFRC",
+            "name": "hema",
+            "role": "Care Manager"
+        },
+        {
+            "user_id": "1234",
+            "password": "$2b$12$Max1GJrwfKwSNWRi8EZvx.xrOXOYUIK7Bn6SUrx1l8vYmOsjEdM7S",
+            "name": "Keer",
+            "role": "Care Manager"
+        }
+    ]
+}

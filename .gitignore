@@ -1,0 +1,12 @@
+*.zip
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.py[cod]
+catboost_info/
+venv/
+.venv/
+.env
+.vscode/
+.idea/
