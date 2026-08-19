@@ -1,165 +1,479 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+
 try:
-    from carenavigator.database import get_patient_by_id, get_patient_encounters
+    from carenavigator.database import get_patient_by_id
 except ImportError:
-    from database import get_patient_by_id, get_patient_encounters
+    from database import get_patient_by_id
+
+
+# ============================================================
+# PATIENT DETAIL PAGE
+# ============================================================
 
 def render_patient_detail():
-    # Back button
+
+    # ========================================================
+    # BACK BUTTON
+    # ========================================================
+
     if st.button("← Back to Patients"):
         st.session_state.page = "patients"
         st.rerun()
-        
-    patient_id = st.session_state.get("selected_patient_id")
+
+    # ========================================================
+    # GET SELECTED PATIENT ID
+    # ========================================================
+
+    patient_id = st.session_state.get(
+        "selected_patient_id"
+    )
+
     if not patient_id:
         st.error("No patient selected.")
         return
-        
-    patient = get_patient_by_id(patient_id)
-    if not patient:
-        st.error(f"Patient with ID {patient_id} not found in database.")
-        return
-        
-    # Demographic Header Card
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    col_hdr, col_btn = st.columns([3, 1])
-    p_age = patient.get('age')
-    age_str = f"{int(p_age)}" if p_age is not None and not pd.isna(p_age) else "N/A"
 
-    with col_hdr:
-        st.markdown(f"""
-            <span style='font-size:0.9rem; color:#666; font-weight:600;'>PATIENT PROFILE</span>
-            <h1 style='margin:0; color:#1D3557;'>{patient['name']}</h1>
-            <p style='margin:0.2rem 0; color:#444;'>
-                ID: <b>{patient['patient_id']}</b> &nbsp;|&nbsp; 
-                Age: <b>{age_str}</b> &nbsp;|&nbsp; 
-                Gender: <b>{patient['gender']}</b> &nbsp;|&nbsp; 
-                Region: <b>{patient['region']}</b>
-            </p>
-        """, unsafe_allow_html=True)
-    with col_btn:
-        st.write("") # Spacing
-        if st.button("➕ New Encounter", use_container_width=True):
-            st.session_state.page = "new_encounter"
-            st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    st.write("")
-    
-    # 2-Column Details Layout
-    col_left, col_right = st.columns([1, 1])
-    
+    # ========================================================
+    # GET PATIENT FROM DATABASE
+    # ========================================================
+
+    try:
+        patient = get_patient_by_id(patient_id)
+
+    except Exception as e:
+        st.error(
+            f"Unable to load patient data: {e}"
+        )
+        return
+
+    if not patient:
+        st.error(
+            f"Patient with ID {patient_id} "
+            "not found in database."
+        )
+        return
+
+    # ========================================================
+    # PATIENT PROFILE
+    #
+    # AGE INTENTIONALLY NOT DISPLAYED
+    # ========================================================
+
+    st.markdown("## Patient Profile")
+
+    patient_name = patient.get(
+        "name",
+        "Unknown"
+    )
+
+    patient_gender = patient.get(
+        "gender",
+        "N/A"
+    )
+
+    patient_region = patient.get(
+        "region",
+        "N/A"
+    )
+
+    st.markdown(
+        f"### {patient_name}"
+    )
+
+    st.write(
+        f"**ID:** {patient.get('patient_id', patient_id)}"
+    )
+
+    st.write(
+        f"**Gender:** {patient_gender}"
+    )
+
+    st.write(
+        f"**Region:** {patient_region}"
+    )
+
+    # ========================================================
+    # NEW ENCOUNTER BUTTON
+    # ========================================================
+
+    if st.button(
+        "➕ New Encounter",
+        use_container_width=True
+    ):
+        st.session_state.page = "new_encounter"
+        st.rerun()
+
+    st.divider()
+
+    # ========================================================
+    # TWO COLUMN LAYOUT
+    # ========================================================
+
+    col_left, col_right = st.columns(
+        [1, 1]
+    )
+
+    # ========================================================
+    # LEFT COLUMN
+    # ========================================================
+
     with col_left:
-        # Medical & Demographics details
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        st.subheader("Clinical Summary")
-        
-        st.markdown(f"""
-            <table class='detail-table'>
-                <tr><th>Primary Condition</th><td>{patient.get('condition', 'N/A')}</td></tr>
-                <tr><th>Diagnosis Category</th><td>{patient.get('diagnosis_category', 'N/A')}</td></tr>
-                <tr><th>Past Diagnosis Mode</th><td>{patient.get('past_diagnosis_category_mode', 'N/A')}</td></tr>
-                <tr><th>Triage Acuity Level</th><td>Level {int(patient.get('triage_acuity', 3))}</td></tr>
-                <tr><th>Clinical Severity</th><td>{patient.get('severity', 'N/A')}</td></tr>
-                <tr><th>Contact Phone</th><td>{patient.get('phone_number', 'N/A')}</td></tr>
-            </table>
-        """, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.write("")
-        
-        # Hospitalization Section
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        st.subheader("Hospitalization Information")
-        st.info("Hospitalization Information: No hospitalization field available in current dataset.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.write("")
-        
-        # Care Management Section
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        st.subheader("Care Management & Primary Care")
-        
-        has_pcp = int(patient.get('has_primary_care_provider', 0))
-        pcp_str = "Yes" if has_pcp == 1 else "No"
-        avg_pcp_visits = patient.get('pcp_visits_last_12_months', 0)
-        days_since_pcp = patient.get('days_since_last_pcp_visit', 0)
-        
-        st.markdown(f"""
-            <table class='detail-table'>
-                <tr><th>Primary Care Provider (PCP)</th><td><b>{pcp_str}</b></td></tr>
-                <tr><th>PCP Visits (Last 12 Mo)</th><td>{int(avg_pcp_visits)} visits</td></tr>
-                <tr><th>Days Since Last PCP Visit</th><td>{int(days_since_pcp)} days</td></tr>
-                <tr><th>Alternative Care Access</th><td>{"Has Access" if patient.get('alternative_care_access') == 1 else "No Access"}</td></tr>
-            </table>
-        """, unsafe_allow_html=True)
-        
-        st.write("")
-        
-        # Visual indicator of CM Contact
-        cm_contact = int(patient.get('care_management_contact_last_90_days', 0))
-        cm_label = "Contacted" if cm_contact == 1 else "Not Contacted"
-        cm_color = "#457B9D" if cm_contact == 1 else "#E63946"
-        
-        st.markdown(f"""
-            <div style='background-color:#F8F9FA; padding:1rem; border-radius:8px; border-left:4px solid {cm_color}; text-align:center;'>
-                <span style='font-size:0.85rem; color:#666;'>Care Management Contact (Last 90 Days)</span>
-                <h3 style='margin:0.2rem 0; color:{cm_color};'>{cm_label}</h3>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-    with col_right:
-        # ED Utilization Section
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        st.subheader("ED Utilization")
-        
-        col_ed1, col_ed2 = st.columns(2)
-        with col_ed1:
-            st.metric("Prior ED Visits", int(patient.get('prior_ed_visits', 0)))
-            st.metric("ED Visits (Last 30 Days)", int(patient.get('ed_visits_last_30_days', 0)))
-        with col_ed2:
-            st.metric("ED Visits (Last 90 Days)", int(patient.get('ed_visits_last_90_days', 0)))
-            days_since_ed = patient.get('days_since_last_ed_visit', 0)
-            st.metric("Days Since Last ED Visit", f"{int(days_since_ed)} days" if not pd.isna(days_since_ed) else "None")
-            
+
+        # ====================================================
+        # CLINICAL SUMMARY
+        #
+        # AGE NOT DISPLAYED
+        # SEVERITY NOT DISPLAYED
+        # ====================================================
+
+        st.subheader(
+            "Clinical Summary"
+        )
+
+       
+       
+        past_diagnosis = patient.get(
+            "past_diagnosis_category_mode"
+        )
+
+        if (
+            past_diagnosis is None
+            or pd.isna(past_diagnosis)
+        ):
+            past_diagnosis = "N/A"
+
+        triage_acuity = patient.get(
+            "triage_acuity",
+            3
+        )
+
+        try:
+            triage_acuity = int(
+                triage_acuity
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            triage_acuity = 3
+
+        phone_number = patient.get(
+            "phone_number"
+        )
+
+        if phone_number is None or pd.isna(
+            phone_number
+        ):
+            phone_number = "N/A"
+
+        # ----------------------------------------------------
+        # DISPLAY USING NATIVE STREAMLIT
+        # NO HTML
+        # ----------------------------------------------------
+
+       
+
+        st.write(
+            "**Past Diagnosis Mode:**",
+            past_diagnosis
+        )
+
+        st.write(
+            "**Triage Acuity Level:**",
+            f"Level {triage_acuity}"
+        )
+
+        st.write(
+            "**Contact Phone:**",
+            phone_number
+        )
+
         st.divider()
-        
-        # Avoidable Probability Display
-        avoidable_status = "Potentially Avoidable" if int(patient.get('potentially_avoidable', 0)) == 1 else "Non-Avoidable"
-        prob_val = float(patient.get('potentially_avoidable_probability', 0.0)) * 100
-        
-        st.markdown(f"""
-            <div style='margin-bottom:1rem;'>
-                <strong>Historical Avoidable Status:</strong> 
-                <span style='font-size:1.1rem; color:#457B9D; font-weight:bold;'>{avoidable_status}</span>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"**Avoidability Probability: {prob_val:.1f}%**")
-        st.progress(prob_val / 100.0)
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.write("")
-        
-        # Encounter History Section
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        st.subheader("Recent Encounter Logs")
-        
-        encounters = get_patient_encounters(patient_id)
-        if not encounters:
-            st.info("No previous encounter logs found for this patient.")
+
+        # ====================================================
+        # HOSPITALIZATION
+        # ====================================================
+
+        st.subheader(
+            "Hospitalization Information"
+        )
+
+        st.info(
+            "No hospitalization field "
+            "is available in the current dataset."
+        )
+
+        st.divider()
+
+        # ====================================================
+        # CARE MANAGEMENT
+        # ====================================================
+
+        st.subheader(
+            "Care Management & Primary Care"
+        )
+
+        # ----------------------------------------------------
+        # PCP
+        # ----------------------------------------------------
+
+        has_pcp = patient.get(
+            "has_primary_care_provider",
+            0
+        )
+
+        try:
+            has_pcp = int(has_pcp)
+        except (
+            TypeError,
+            ValueError
+        ):
+            has_pcp = 0
+
+        pcp_text = (
+            "Yes"
+            if has_pcp == 1
+            else "No"
+        )
+
+        # ----------------------------------------------------
+        # PCP VISITS
+        # ----------------------------------------------------
+
+        pcp_visits = patient.get(
+            "pcp_visits_last_12_months",
+            0
+        )
+
+        try:
+            pcp_visits = int(
+                pcp_visits
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            pcp_visits = 0
+
+        # ----------------------------------------------------
+        # DAYS SINCE PCP
+        # ----------------------------------------------------
+
+        days_since_pcp = patient.get(
+            "days_since_last_pcp_visit",
+            0
+        )
+
+        try:
+            days_since_pcp = int(
+                days_since_pcp
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            days_since_pcp = 0
+
+        # ----------------------------------------------------
+        # ALTERNATIVE CARE ACCESS
+        # ----------------------------------------------------
+
+        alternative_access = patient.get(
+            "alternative_care_access",
+            0
+        )
+
+        try:
+            alternative_access = int(
+                alternative_access
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            alternative_access = 0
+
+        alternative_text = (
+            "Has Access"
+            if alternative_access == 1
+            else "No Access"
+        )
+
+        st.write(
+            "**Primary Care Provider (PCP):**",
+            pcp_text
+        )
+
+        st.write(
+            "**PCP Visits (Last 12 Months):**",
+            f"{pcp_visits} visits"
+        )
+
+        st.write(
+            "**Days Since Last PCP Visit:**",
+            f"{days_since_pcp} days"
+        )
+
+        st.write(
+            "**Alternative Care Access:**",
+            alternative_text
+        )
+
+        # ====================================================
+        # CARE MANAGEMENT CONTACT
+        # ====================================================
+
+        cm_contact = patient.get(
+            "care_management_contact_last_90_days",
+            0
+        )
+
+        try:
+            cm_contact = int(
+                cm_contact
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            cm_contact = 0
+
+        if cm_contact == 1:
+
+            st.success(
+                "Care Management Contact "
+                "(Last 90 Days): Contacted"
+            )
+
         else:
-            for idx, enc in enumerate(encounters):
-                with st.expander(f"Encounter {enc['encounter_id']} - {enc['timestamp'][:16]}", expanded=(idx == 0)):
-                    st.markdown(f"""
-                        **Clinical Summary:**
-                        - Vitals: BP `{int(enc['systolic_bp'])}/{int(enc['diastolic_bp'])} mmHg`, HR `{int(enc['heart_rate'])} bpm`, Temp `{enc['temperature']} °C`, O2 `{int(enc['oxygen_saturation'])}%`
-                        - Severity: `{enc['severity']}` | Symptom Duration: `{enc['symptom_duration_days']} Days`
-                        - Recommendation: **{enc.get('recommendation', 'N/A')}**
-                        - Predict: `{enc.get('prediction_result', 'N/A')}` ({round(float(enc.get('confidence_score', 0)) * 100, 1)}% Conf)
-                    """)
-        st.markdown("</div>", unsafe_allow_html=True)
+
+            st.warning(
+                "Care Management Contact "
+                "(Last 90 Days): Not Contacted"
+            )
+
+    # ========================================================
+    # RIGHT COLUMN
+    # ========================================================
+
+    with col_right:
+
+        # ====================================================
+        # ED UTILIZATION
+        # ====================================================
+
+        st.subheader(
+            "ED Utilization"
+        )
+
+        # ----------------------------------------------------
+        # PRIOR ED VISITS
+        # ----------------------------------------------------
+
+        prior_ed = patient.get(
+            "prior_ed_visits",
+            0
+        )
+
+        try:
+            prior_ed = int(prior_ed)
+        except (
+            TypeError,
+            ValueError
+        ):
+            prior_ed = 0
+
+        # ----------------------------------------------------
+        # ED LAST 30 DAYS
+        # ----------------------------------------------------
+
+        ed_30 = patient.get(
+            "ed_visits_last_30_days",
+            0
+        )
+
+        try:
+            ed_30 = int(ed_30)
+        except (
+            TypeError,
+            ValueError
+        ):
+            ed_30 = 0
+
+        # ----------------------------------------------------
+        # ED LAST 90 DAYS
+        # ----------------------------------------------------
+
+        ed_90 = patient.get(
+            "ed_visits_last_90_days",
+            0
+        )
+
+        try:
+            ed_90 = int(ed_90)
+        except (
+            TypeError,
+            ValueError
+        ):
+            ed_90 = 0
+
+        # ----------------------------------------------------
+        # DAYS SINCE LAST ED
+        # ----------------------------------------------------
+
+        days_since_ed = patient.get(
+            "days_since_last_ed_visit"
+        )
+
+        try:
+
+            if (
+                days_since_ed is None
+                or pd.isna(days_since_ed)
+            ):
+                days_since_ed_text = "None"
+
+            else:
+                days_since_ed_text = (
+                    f"{int(days_since_ed)} days"
+                )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+            days_since_ed_text = "None"
+
+        # ----------------------------------------------------
+        # METRICS
+        # ----------------------------------------------------
+
+        metric1, metric2 = st.columns(2)
+
+        with metric1:
+
+            st.metric(
+                "Prior ED Visits",
+                prior_ed
+            )
+
+            st.metric(
+                "ED Visits (Last 30 Days)",
+                ed_30
+            )
+
+        with metric2:
+
+            st.metric(
+                "ED Visits (Last 90 Days)",
+                ed_90
+            )
+
+            st.metric(
+                "Days Since Last ED Visit",
+                days_since_ed_text
+            )
+
+        st.divider()
+
+        

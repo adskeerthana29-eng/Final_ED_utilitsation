@@ -1,562 +1,827 @@
-# ============================================================
-# UC07 — NAVIGATION RULES
-# ============================================================
+"""
+Navigation Rules for Avoidable ED Utilization
+
+Purpose
+-------
+Convert the ML avoidability prediction + current clinical safety information
++ access barriers into a care-navigation recommendation.
+
+IMPORTANT
+---------
+This module does NOT diagnose the patient and does NOT decide whether a
+patient should or should not use emergency care.
+
+The ML model identifies a pattern that MAY be associated with potentially
+avoidable ED utilization.
+
+The navigation layer:
+    1. Performs a safety screen.
+    2. Categorizes model confidence.
+    3. Identifies access barriers.
+    4. Suggests appropriate care-navigation options.
+    5. Leaves the final decision to the care manager.
+
+Emergency symptoms / concerning clinical findings always take priority
+over the avoidability prediction.
+"""
+
+from typing import Any, Dict, List, Optional
+
+
+# ---------------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------------
+
+# Model probability thresholds.
 #
-# ML prediction:
-#   potentially_avoidable_probability
+# These are PROJECT DESIGN thresholds, not clinically validated thresholds.
+# They should be validated with appropriate clinical/business stakeholders
+# before production use.
+LOW_RISK_THRESHOLD = 0.40
+HIGH_RISK_THRESHOLD = 0.60
+
+# Safety thresholds.
 #
-# Navigation barriers:
-#   - No insurance
-#   - After-hours problem
-#   - Transportation barrier
-#   - No PCP
-#   - No alternative-care access
-#
-# Clinical safety:
-#   - Triage acuity: 1–5
-#   - Severity: Mild / Moderate / Severe
-#   - Oxygen saturation
-#   - Heart rate
-#   - Systolic BP
-#
-# IMPORTANT:
-# This system supports FUTURE CARE NAVIGATION.
-# It must NOT tell a patient to avoid emergency care.
-# ============================================================
+# These are intentionally conservative project-level screening rules.
+# They are NOT diagnostic criteria.
+LOW_OXYGEN_SATURATION = 92
+HIGH_HEART_RATE = 120
+HIGH_SYSTOLIC_BP = 180
+
+HIGH_ACUITY_LEVELS = {1, 2}
+SEVERE_LEVELS = {"severe", "critical", "high"}
 
 
-# ============================================================
-# 1. CLINICAL SAFETY CHECK
-# ============================================================
+# ---------------------------------------------------------------------------
+# HELPER FUNCTIONS
+# ---------------------------------------------------------------------------
 
-def clinical_safety_check(patient):
+def _safe_float(value: Any) -> Optional[float]:
+    """
+    Safely convert a value to float.
 
-    safety_reasons = []
+    Returns None if the value is missing or invalid.
+    """
+    if value is None:
+        return None
 
-
-    # ========================================================
-    # TRIAGE ACUITY
-    # ========================================================
-    #
-    # Your dataset uses:
-    #
-    # 1 = highest urgency
-    # 5 = lowest urgency
-    #
-    # Therefore:
-    # 1 and 2 -> safety review
-    #
-    # ========================================================
-
-    triage_acuity = patient.get(
-        "triage_acuity"
-    )
-
-    if triage_acuity is not None:
-
-        try:
-
-            triage_acuity = int(
-                triage_acuity
-            )
-
-            if triage_acuity in [1, 2]:
-
-                safety_reasons.append(
-                    f"High-priority triage acuity "
-                    f"({triage_acuity})"
-                )
-
-        except (
-            ValueError,
-            TypeError
-        ):
-
-            safety_reasons.append(
-                "Unable to parse triage acuity — "
-                "flagged for manual review"
-            )
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
-    # ========================================================
-    # SEVERITY
-    # ========================================================
-    #
-    # Dataset values:
-    # Mild
-    # Moderate
-    # Severe
-    #
-    # Severe severity -> safety review
-    # ========================================================
+def _safe_int(value: Any) -> Optional[int]:
+    """
+    Safely convert a value to integer.
 
-    severity = str(
-        patient.get(
-            "severity",
-            ""
-        )
-    ).strip().lower()
+    Returns None if the value is missing or invalid.
+    """
+    if value is None:
+        return None
+
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
-    if severity == "severe":
+def _normalise_text(value: Any) -> str:
+    """
+    Normalize text for comparisons.
+    """
+    if value is None:
+        return ""
 
-        safety_reasons.append(
-            "High severity"
-        )
-
-
-    # ========================================================
-    # OXYGEN SATURATION
-    # ========================================================
-
-    oxygen = patient.get(
-        "oxygen_saturation"
-    )
+    return str(value).strip().lower()
 
 
-    if oxygen is not None:
+def _is_true(value: Any) -> bool:
+    """
+    Convert common boolean representations into True/False.
+    """
+    if isinstance(value, bool):
+        return value
 
-        try:
+    if value is None:
+        return False
 
-            oxygen = float(
-                oxygen
-            )
+    if isinstance(value, (int, float)):
+        return value == 1
 
-            if oxygen < 92:
+    text = str(value).strip().lower()
 
-                safety_reasons.append(
-                    "Low oxygen saturation"
-                )
-
-        except (
-            ValueError,
-            TypeError
-        ):
-
-            pass
-
-
-    # ========================================================
-    # HEART RATE
-    # ========================================================
-
-    heart_rate = patient.get(
-        "heart_rate"
-    )
-
-
-    if heart_rate is not None:
-
-        try:
-
-            heart_rate = float(
-                heart_rate
-            )
-
-            if heart_rate > 120:
-
-                safety_reasons.append(
-                    "Elevated heart rate"
-                )
-
-        except (
-            ValueError,
-            TypeError
-        ):
-
-            pass
-
-
-    # ========================================================
-    # SYSTOLIC BLOOD PRESSURE
-    # ========================================================
-
-    systolic_bp = patient.get(
-        "systolic_bp"
-    )
-
-
-    if systolic_bp is not None:
-
-        try:
-
-            systolic_bp = float(
-                systolic_bp
-            )
-
-            if systolic_bp >= 180:
-
-                safety_reasons.append(
-                    "Very high systolic blood pressure"
-                )
-
-        except (
-            ValueError,
-            TypeError
-        ):
-
-            pass
-
-
-    # ========================================================
-    # FINAL SAFETY RESULT
-    # ========================================================
-
-    return {
-
-        "safety_flag":
-            len(safety_reasons) > 0,
-
-        "reasons":
-            safety_reasons
+    return text in {
+        "true",
+        "yes",
+        "y",
+        "1",
+        "on",
+        "checked",
     }
 
 
-# ============================================================
-# 2. IDENTIFY NAVIGATION BARRIERS
-# ============================================================
+# ---------------------------------------------------------------------------
+# SAFETY SCREEN
+# ---------------------------------------------------------------------------
 
-def identify_navigation_barriers(patient):
+def check_clinical_safety(patient: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Perform a basic safety screen using current encounter information.
 
-    barriers = []
+    IMPORTANT:
+    This is a safety override layer, NOT a medical diagnosis.
 
+    Returns
+    -------
+    dict
+        {
+            "safety_concern": bool,
+            "reasons": [...],
+            "severity": "high"/"moderate"/"none"
+        }
+    """
 
-    # ========================================================
-    # NO INSURANCE
-    # ========================================================
+    reasons: List[str] = []
 
-    if str(
-        patient.get(
-            "barrier_no_insurance",
-            0
+    # -------------------------------------------------------
+    # Triage acuity
+    # -------------------------------------------------------
+
+    triage = _safe_int(patient.get("triage_acuity"))
+
+    if triage is not None and triage in HIGH_ACUITY_LEVELS:
+        reasons.append(
+            f"Triage acuity is {triage}, indicating a high-priority "
+            "presentation requiring clinical assessment."
         )
-    ).strip() == "1":
 
-        barriers.append({
+    # -------------------------------------------------------
+    # Severity
+    # -------------------------------------------------------
 
-            "barrier":
-                "No insurance",
+    severity = _normalise_text(patient.get("severity"))
 
-            "reason":
-                "The patient reports an insurance barrier.",
-
-            "navigation":
-                "Review available insurance coverage "
-                "and financial assistance resources."
-        })
-
-
-    # ========================================================
-    # AFTER-HOURS PROBLEM
-    # ========================================================
-
-    if str(
-        patient.get(
-            "barrier_after_hours_problem",
-            0
+    if severity in SEVERE_LEVELS:
+        reasons.append(
+            f"Current reported severity is '{patient.get('severity')}'."
         )
-    ).strip() == "1":
 
-        barriers.append({
+    # -------------------------------------------------------
+    # Oxygen saturation
+    # -------------------------------------------------------
 
-            "barrier":
-                "After-hours access problem",
+    oxygen = _safe_float(patient.get("oxygen_saturation"))
 
-            "reason":
-                "The patient reports difficulty "
-                "accessing care after normal hours.",
-
-            "navigation":
-                "TELEHEALTH"
-        })
-
-
-    # ========================================================
-    # TRANSPORTATION BARRIER
-    # ========================================================
-
-    if str(
-        patient.get(
-            "transportation_barrier",
-            0
+    if oxygen is not None and oxygen < LOW_OXYGEN_SATURATION:
+        reasons.append(
+            f"Oxygen saturation is {oxygen:.0f}%, which requires "
+            "clinical assessment."
         )
-    ).strip() == "1":
 
-        barriers.append({
+    # -------------------------------------------------------
+    # Heart rate
+    # -------------------------------------------------------
 
-            "barrier":
-                "Transportation barrier",
+    heart_rate = _safe_float(patient.get("heart_rate"))
 
-            "reason":
-                "Transportation may limit access "
-                "to other care settings.",
-
-            "navigation":
-                "TELEHEALTH "
-                "assistance and accessible care options."
-        })
-
-
-    # ========================================================
-    # NO PRIMARY CARE PROVIDER
-    # ========================================================
-
-    if str(
-        patient.get(
-            "has_primary_care_provider",
-            0
+    if heart_rate is not None and heart_rate > HIGH_HEART_RATE:
+        reasons.append(
+            f"Heart rate is {heart_rate:.0f} bpm."
         )
-    ).strip() == "0":
 
-        barriers.append({
+    # -------------------------------------------------------
+    # Systolic blood pressure
+    # -------------------------------------------------------
 
-            "barrier":
-                "No primary care provider",
+    systolic_bp = _safe_float(patient.get("systolic_bp"))
 
-            "reason":
-                "The patient does not currently "
-                "have an established primary care provider.",
-
-            "navigation":
-                "Support connection with an appropriate "
-                "primary care provider."
-        })
-
-
-    # ========================================================
-    # NO ALTERNATIVE CARE ACCESS
-    # ========================================================
-
-    if str(
-        patient.get(
-            "alternative_care_access",
-            0
+    if systolic_bp is not None and systolic_bp >= HIGH_SYSTOLIC_BP:
+        reasons.append(
+            f"Systolic blood pressure is {systolic_bp:.0f} mmHg."
         )
-    ).strip() == "0":
 
-        barriers.append({
+    # -------------------------------------------------------
+    # Determine safety level
+    # -------------------------------------------------------
 
-            "barrier":
-                "Limited alternative-care access",
+    if not reasons:
+        safety_level = "none"
 
-            "reason":
-                "The patient reports no available "
-                "alternative care access.",
+    elif len(reasons) >= 2:
+        safety_level = "high"
 
-            "navigation":
-                "Help identify appropriate primary care, "
-                "urgent care, or telehealth options "
-                "when clinically appropriate."
-        })
+    else:
+        safety_level = "moderate"
 
+    return {
+        "safety_concern": bool(reasons),
+        "reasons": reasons,
+        "severity": safety_level,
+    }
+
+
+# ---------------------------------------------------------------------------
+# ACCESS BARRIERS
+# ---------------------------------------------------------------------------
+
+def identify_access_barriers(patient: Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Identify barriers that may affect access to lower-acuity care.
+
+    Returns a list of structured barrier records.
+    """
+
+    barriers: List[Dict[str, str]] = []
+
+    # -------------------------------------------------------
+    # No insurance
+    # -------------------------------------------------------
+
+    if _is_true(patient.get("barrier_no_insurance")):
+        barriers.append(
+            {
+                "type": "insurance",
+                "title": "Insurance / affordability barrier",
+                "description": (
+                    "The patient may have difficulty accessing care "
+                    "because of insurance or affordability constraints."
+                ),
+                "action": (
+                    "Consider connecting the patient with available "
+                    "coverage, financial-assistance, or community-care "
+                    "resources."
+                ),
+            }
+        )
+
+    # -------------------------------------------------------
+    # After-hours access
+    # -------------------------------------------------------
+
+    if _is_true(patient.get("barrier_after_hours_problem")):
+        barriers.append(
+            {
+                "type": "after_hours",
+                "title": "After-hours access barrier",
+                "description": (
+                    "The patient reports difficulty accessing routine "
+                    "care outside normal operating hours."
+                ),
+                "action": (
+                    "If clinically appropriate, consider telehealth, "
+                    "an after-hours primary-care service, or another "
+                    "available non-emergency care option."
+                ),
+            }
+        )
+
+    # -------------------------------------------------------
+    # Transportation
+    # -------------------------------------------------------
+
+    if _is_true(patient.get("barrier_transportation")):
+        barriers.append(
+            {
+                "type": "transportation",
+                "title": "Transportation barrier",
+                "description": (
+                    "Transportation may make an in-person alternative "
+                    "care visit difficult."
+                ),
+                "action": (
+                    "Consider telehealth or an accessible in-person "
+                    "care option when clinically appropriate."
+                ),
+            }
+        )
+
+    # -------------------------------------------------------
+    # No PCP
+    # -------------------------------------------------------
+
+    has_pcp = patient.get("has_pcp")
+
+    if has_pcp is not None and not _is_true(has_pcp):
+        barriers.append(
+            {
+                "type": "no_pcp",
+                "title": "No established primary-care provider",
+                "description": (
+                    "The patient does not appear to have an established "
+                    "primary-care provider."
+                ),
+                "action": (
+                    "Consider helping the patient establish primary-care "
+                    "follow-up for ongoing management."
+                ),
+            }
+        )
+
+    # -------------------------------------------------------
+    # Limited alternative-care access
+    # -------------------------------------------------------
+
+    alternative_access = patient.get("alternative_care_access")
+
+    if (
+        alternative_access is not None
+        and not _is_true(alternative_access)
+    ):
+        barriers.append(
+            {
+                "type": "limited_alternative_access",
+                "title": "Limited alternative-care access",
+                "description": (
+                    "The patient may have limited access to lower-acuity "
+                    "care alternatives."
+                ),
+                "action": (
+                    "Care management may review available primary-care, "
+                    "urgent-care, telehealth, or community-care options."
+                ),
+            }
+        )
 
     return barriers
 
 
-# ============================================================
-# 3. MAIN NAVIGATION FUNCTION
-# ============================================================
+# ---------------------------------------------------------------------------
+# MODEL RISK CATEGORY
+# ---------------------------------------------------------------------------
 
-def generate_navigation(
-    patient,
-    prediction_result
-):
+def classify_avoidability_probability(
+    probability: float,
+) -> Dict[str, Any]:
+    """
+    Convert model probability into a navigation-oriented category.
 
-    # ========================================================
-    # GET MODEL RESULT
-    # ========================================================
+    Categories:
+        low
+        borderline
+        high
 
-    probability = float(
-        prediction_result[
-            "potentially_avoidable_probability"
-        ]
-    )
+    NOTE:
+    These thresholds are project-design thresholds and are not clinical
+    decision thresholds.
+    """
 
+    probability = max(0.0, min(1.0, float(probability)))
 
-    prediction = int(
-        prediction_result[
-            "prediction"
-        ]
-    )
+    if probability < LOW_RISK_THRESHOLD:
+        category = "low"
+        label = "Low Potential Avoidability"
 
+    elif probability < HIGH_RISK_THRESHOLD:
+        category = "borderline"
+        label = "Borderline Care-Navigation Assessment"
 
-    classification = (
-        prediction_result[
-            "classification"
-        ]
-    )
-
-
-    # ========================================================
-    # STEP 1 — CLINICAL SAFETY CHECK
-    # ========================================================
-
-    safety_result = clinical_safety_check(
-        patient
-    )
-
-
-    # ========================================================
-    # STEP 2 — SAFETY OVERRIDE
-    # ========================================================
-    #
-    # Safety comes before navigation.
-    #
-    # If the patient has high-priority triage,
-    # high severity, or concerning vitals,
-    # do NOT generate avoidability navigation.
-    #
-    # ========================================================
-
-    if safety_result[
-        "safety_flag"
-    ]:
-
-        return {
-
-            "probability":
-                probability,
-
-            "prediction":
-                prediction,
-
-            "classification":
-                classification,
-
-            "navigation_status":
-                "Clinical safety review",
-
-            "safety_flag":
-                True,
-
-            "safety_reasons":
-                safety_result[
-                    "reasons"
-                ],
-
-            "barriers":
-                [],
-
-            "reasons":
-                safety_result[
-                    "reasons"
-                ],
-
-            "navigation_actions": [
-
-                "Do not use the avoidability "
-                "prediction to discourage emergency care.",
-
-                "Follow appropriate clinical "
-                "evaluation and escalation procedures."
-            ]
-        }
-
-
-    # ========================================================
-    # STEP 3 — MODEL PREDICTS NON-AVOIDABLE
-    # ========================================================
-
-    if prediction == 0:
-
-        return {
-
-            "probability":
-                probability,
-
-            "prediction":
-                prediction,
-
-            "classification":
-                "Non-Avoidable",
-
-            "navigation_status":
-                "No potentially-avoidable navigation trigger",
-
-            "safety_flag":
-                False,
-
-            "safety_reasons":
-                [],
-
-            "barriers":
-                [],
-
-            "reasons":
-                [],
-
-            "navigation_actions":
-                []
-        }
-
-
-    # ========================================================
-    # STEP 4 — MODEL PREDICTS POTENTIALLY AVOIDABLE
-    # ========================================================
-
-    barriers = identify_navigation_barriers(
-        patient
-    )
-
-
-    # ========================================================
-    # STEP 5 — EXTRACT REASONS
-    # ========================================================
-
-    reasons = [
-
-        item["reason"]
-
-        for item in barriers
-    ]
-
-
-    # ========================================================
-    # STEP 6 — EXTRACT NAVIGATION ACTIONS
-    # ========================================================
-
-    navigation_actions = [
-
-        item["navigation"]
-
-        for item in barriers
-    ]
-
-
-    # ========================================================
-    # STEP 7 — FINAL NAVIGATION RESULT
-    # ========================================================
+    else:
+        category = "high"
+        label = "Potentially Avoidable Pattern"
 
     return {
-
-        "probability":
-            probability,
-
-        "prediction":
-            prediction,
-
-        "classification":
-            "Potentially Avoidable",
-
-        "navigation_status":
-            "Navigation review recommended",
-
-        "safety_flag":
-            False,
-
-        "safety_reasons":
-            [],
-
-        "barriers": [
-
-            item["barrier"]
-
-            for item in barriers
-        ],
-
-        "reasons":
-            reasons,
-
-        "navigation_actions":
-            navigation_actions
+        "category": category,
+        "label": label,
+        "probability": probability,
     }
+
+
+# ---------------------------------------------------------------------------
+# NAVIGATION OPTIONS
+# ---------------------------------------------------------------------------
+
+def build_navigation_options(
+    patient: Dict[str, Any],
+    barriers: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    """
+    Build possible navigation options based on identified barriers.
+
+    This function does not select a medical treatment.
+    It provides care-access options for care-manager review.
+    """
+
+    options: List[Dict[str, str]] = []
+
+    barrier_types = {
+        barrier["type"]
+        for barrier in barriers
+    }
+
+    # -------------------------------------------------------
+    # Telehealth
+    # -------------------------------------------------------
+
+    if (
+        "after_hours" in barrier_types
+        or "transportation" in barrier_types
+    ):
+        options.append(
+            {
+                "pathway": "Telehealth",
+                "reason": (
+                    "May improve access when transportation or "
+                    "after-hours availability is a barrier."
+                ),
+            }
+        )
+
+    # -------------------------------------------------------
+    # Primary care
+    # -------------------------------------------------------
+
+    if "no_pcp" in barrier_types:
+        options.append(
+            {
+                "pathway": "Primary Care",
+                "reason": (
+                    "Consider establishing or arranging primary-care "
+                    "follow-up for ongoing management."
+                ),
+            }
+        )
+
+    elif "after_hours" not in barrier_types:
+        options.append(
+            {
+                "pathway": "Primary Care",
+                "reason": (
+                    "Primary-care follow-up may be appropriate when "
+                    "the current condition is clinically stable."
+                ),
+            }
+        )
+
+    # -------------------------------------------------------
+    # Urgent care
+    # -------------------------------------------------------
+
+    options.append(
+        {
+            "pathway": "Urgent Care",
+            "reason": (
+                "May be considered for clinically appropriate "
+                "same-day or short-term evaluation when emergency "
+                "care is not required."
+            ),
+        }
+    )
+
+    # -------------------------------------------------------
+    # Care management
+    # -------------------------------------------------------
+
+    options.append(
+        {
+            "pathway": "Care Management Follow-up",
+            "reason": (
+                "Review symptoms, barriers, available services, "
+                "and appropriate follow-up options."
+            ),
+        }
+    )
+
+    # -------------------------------------------------------
+    # Remove duplicate pathways
+    # -------------------------------------------------------
+
+    unique_options = []
+    seen = set()
+
+    for option in options:
+        pathway = option["pathway"]
+
+        if pathway not in seen:
+            unique_options.append(option)
+            seen.add(pathway)
+
+    return unique_options
+
+
+# ---------------------------------------------------------------------------
+# MAIN NAVIGATION DECISION
+# ---------------------------------------------------------------------------
+
+def generate_navigation_recommendation(
+    patient: Dict[str, Any],
+    avoidability_probability: float,
+    prediction: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Generate the complete care-navigation recommendation.
+
+    Parameters
+    ----------
+    patient:
+        Current encounter + relevant EHR information.
+
+    avoidability_probability:
+        CatBoost probability for potentially avoidable ED utilization.
+
+    prediction:
+        Optional binary model prediction.
+
+    Returns
+    -------
+    dict
+        Structured navigation result suitable for UI/API.
+    """
+
+    # -------------------------------------------------------
+    # 1. Safety comes FIRST
+    # -------------------------------------------------------
+
+    safety = check_clinical_safety(patient)
+
+    # -------------------------------------------------------
+    # Safety override
+    # -------------------------------------------------------
+
+    if safety["safety_concern"]:
+
+        return {
+            "status": "safety_review",
+            "status_label": "Clinical Safety Review Required",
+
+            "avoidability_probability": round(
+                float(avoidability_probability) * 100,
+                1,
+            ),
+
+            "recommendation": (
+                "Current clinical information contains findings "
+                "that require clinical assessment. The avoidability "
+                "prediction should not be used to discourage or "
+                "delay emergency evaluation."
+            ),
+
+            "recommended_pathway": (
+                "Clinical evaluation / appropriate escalation"
+            ),
+
+            "care_manager_action": (
+                "Follow the appropriate clinical escalation process "
+                "based on the patient's current presentation."
+            ),
+
+            "safety_override": True,
+
+            "safety_reasons": safety["reasons"],
+
+            "barriers": identify_access_barriers(patient),
+
+            "navigation_options": [],
+
+            "disclaimer": (
+                "This system is a decision-support tool. It does not "
+                "diagnose the patient or determine whether emergency "
+                "care is required."
+            ),
+        }
+
+    # -------------------------------------------------------
+    # 2. Classify model probability
+    # -------------------------------------------------------
+
+    risk = classify_avoidability_probability(
+        avoidability_probability
+    )
+
+    # -------------------------------------------------------
+    # 3. Identify access barriers
+    # -------------------------------------------------------
+
+    barriers = identify_access_barriers(patient)
+
+    # -------------------------------------------------------
+    # 4. LOW probability
+    # -------------------------------------------------------
+
+    if risk["category"] == "low":
+
+        return {
+            "status": "low_avoidability",
+            "status_label": "No Lower-Acuity Navigation Indicated",
+
+            "avoidability_probability": round(
+                risk["probability"] * 100,
+                1,
+            ),
+
+            "recommendation": (
+                "The model does not identify a strong pattern of "
+                "potentially avoidable ED utilization for this "
+                "encounter."
+            ),
+
+            "recommended_pathway": (
+                "No ED-substitution intervention indicated"
+            ),
+
+            "care_manager_action": (
+                "No immediate lower-acuity navigation intervention "
+                "is indicated based on this assessment. Continue "
+                "appropriate follow-up according to the patient's "
+                "clinical plan."
+            ),
+
+            "safety_override": False,
+
+            "safety_reasons": [],
+
+            "barriers": barriers,
+
+            "navigation_options": [],
+
+            "disclaimer": (
+                "The model prediction does not determine whether "
+                "emergency care is necessary."
+            ),
+        }
+
+    # -------------------------------------------------------
+    # 5. BORDERLINE probability
+    # -------------------------------------------------------
+
+    if risk["category"] == "borderline":
+
+        options = build_navigation_options(
+            patient,
+            barriers,
+        )
+
+        return {
+            "status": "borderline",
+            "status_label": "Borderline Care-Navigation Assessment",
+
+            "avoidability_probability": round(
+                risk["probability"] * 100,
+                1,
+            ),
+
+            "recommendation": (
+                "The model does not have sufficient confidence to "
+                "classify this encounter as clearly potentially "
+                "avoidable."
+            ),
+
+            "recommended_pathway": (
+                "Care Manager Review"
+            ),
+
+            "care_manager_action": (
+                "Review the patient's current symptoms, clinical "
+                "status, access barriers, and available care options "
+                "before selecting a navigation pathway."
+            ),
+
+            "safety_override": False,
+
+            "safety_reasons": [],
+
+            "barriers": barriers,
+
+            "navigation_options": options,
+
+            "automatic_substitution": False,
+
+            "disclaimer": (
+                "No automatic lower-acuity substitution is recommended. "
+                "Any care-navigation decision should be made by the "
+                "appropriate care professional based on the patient's "
+                "current clinical context."
+            ),
+        }
+
+    # -------------------------------------------------------
+    # 6. HIGH probability
+    # -------------------------------------------------------
+
+    options = build_navigation_options(
+        patient,
+        barriers,
+    )
+
+    # -------------------------------------------------------
+    # No barriers
+    # -------------------------------------------------------
+
+    if not barriers:
+
+        care_manager_action = (
+            "Review the patient's current symptoms and clinical "
+            "context. If clinically appropriate, consider primary "
+            "care, urgent care, telehealth, or care-management "
+            "follow-up as an alternative pathway."
+        )
+
+    else:
+
+        care_manager_action = (
+            "Review the identified access barriers and select an "
+            "appropriate care pathway. Potential options are shown "
+            "for care-manager consideration."
+        )
+
+    return {
+        "status": "potentially_avoidable",
+        "status_label": "Potentially Avoidable Pattern",
+
+        "avoidability_probability": round(
+            risk["probability"] * 100,
+            1,
+        ),
+
+        "recommendation": (
+            "The model identified a pattern consistent with "
+            "potentially avoidable ED utilization. The patient "
+            "should still be assessed for clinical safety before "
+            "considering an alternative care pathway."
+        ),
+
+        "recommended_pathway": (
+            "Care-navigation assessment"
+        ),
+
+        "care_manager_action": care_manager_action,
+
+        "safety_override": False,
+
+        "safety_reasons": [],
+
+        "barriers": barriers,
+
+        "navigation_options": options,
+
+        "automatic_substitution": False,
+
+        "disclaimer": (
+            "This recommendation does not mean the patient should "
+            "avoid emergency care. If emergency symptoms are present "
+            "or the patient's condition worsens, appropriate emergency "
+            "evaluation should not be delayed."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# BACKWARD-COMPATIBLE FUNCTION
+# ---------------------------------------------------------------------------
+
+def get_navigation_recommendation(
+    patient: Dict[str, Any],
+    prediction: int,
+    probability: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Backward-compatible wrapper.
+
+    This allows existing code to continue calling the navigation
+    module with:
+
+        get_navigation_recommendation(
+            patient,
+            prediction,
+            probability
+        )
+
+    If probability is not supplied, prediction is used as a fallback.
+
+    NOTE:
+    The probability should ideally always be passed from CatBoost.
+    """
+
+    if probability is None:
+
+        probability = (
+            1.0
+            if int(prediction) == 1
+            else 0.0
+        )
+
+    return generate_navigation_recommendation(
+        patient=patient,
+        avoidability_probability=probability,
+        prediction=prediction,
+    )
+
+
+# ---------------------------------------------------------------------------
+# OPTIONAL ALIAS
+# ---------------------------------------------------------------------------
+
+def navigation_rules(
+    patient: Dict[str, Any],
+    prediction: int,
+    probability: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Alias for compatibility with code that imports navigation_rules().
+    """
+
+    return get_navigation_recommendation(
+        patient=patient,
+        prediction=prediction,
+        probability=probability,
+    )
