@@ -1,26 +1,21 @@
-# ============================================================
+
 # UC07 — COMPLETE NAVIGATION TEST
-# ============================================================
 
 from navigation_service import (
     navigate_patient
 )
 
 
-# ============================================================
 # PATIENT 1
 #
 # Expected:
 # High potentially-avoidable probability
 # Multiple navigation barriers
-# ============================================================
+
 
 patient_1 = {
 
-    # --------------------------------------------------------
-    # PAST / HISTORICAL
-    # --------------------------------------------------------
-
+    
     "past_diagnosis_category_mode":
         "Respiratory",
 

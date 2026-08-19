@@ -1,28 +1,13 @@
-"""
-Schema definitions and constants for ED-Utilization-Navigator.
-
-Defines table names, expected column definitions, data types, and security
-whitelists for sortable/filterable columns to guarantee query safety.
-"""
 
 from typing import Dict, List, Set, Tuple
 
-# ==========================================================
-# Table Names
-# ==========================================================
 
 TABLE_EHR_HISTORICAL_DATA = "ehr_historical_data"
 TABLE_CURRENT_PATIENT_DATA = "current_patient_data"
 
-# ==========================================================
-# Dataset Information
-# ==========================================================
-
 TOTAL_EXPECTED_ROWS = 10000
 
-# ==========================================================
-# Historical EHR Table Schema
-# ==========================================================
+
 
 EXPECTED_COLUMNS: List[Tuple[str, str]] = [
     ("patient_id", "TEXT"),
@@ -41,9 +26,6 @@ EXPECTED_COLUMNS: List[Tuple[str, str]] = [
     ("days_since_last_pcp_visit", "INTEGER"),
 ]
 
-# ==========================================================
-# Column Names
-# ==========================================================
 
 COLUMN_NAMES: List[str] = [column[0] for column in EXPECTED_COLUMNS]
 
@@ -52,9 +34,7 @@ COLUMN_TYPES: Dict[str, str] = {
     for column in EXPECTED_COLUMNS
 }
 
-# ==========================================================
-# Security
-# ==========================================================
+
 
 SORTABLE_COLUMNS: Set[str] = set(COLUMN_NAMES)
 
@@ -81,9 +61,6 @@ FILTERABLE_COLUMNS: Dict[str, str] = {
     "days_since_last_pcp_visit": "INTEGER",
 }
 
-# ==========================================================
-# Range Filters
-# ==========================================================
 
 RANGE_SUFFIXES: Tuple[str, str] = (
     "_min",

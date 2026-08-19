@@ -1,8 +1,4 @@
-# ============================================================
-# UC07 — NAVIGATION SERVICE
-# ============================================================
-#
-# Flow:
+# 
 #
 # Patient / Feature Vector
 #          ↓
@@ -13,21 +9,15 @@
 # Avoidability category
 #          ↓
 # Access-barrier analysis
-#          ↓
+#         ↓
 # Navigation recommendation
-#
-# IMPORTANT:
-# This service does NOT tell a patient to avoid emergency care.
-# It provides decision support for the care manager.
-# ============================================================
+
 
 from pathlib import Path
 import sys
 
 
-# ============================================================
 # 1. PROJECT PATH
-# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -45,9 +35,9 @@ for p in [
         sys.path.insert(0, p)
 
 
-# ============================================================
+
 # 2. IMPORT NAVIGATION RULES
-# ============================================================
+
 
 try:
 
@@ -62,9 +52,9 @@ except ImportError:
     )
 
 
-# ============================================================
+
 # 3. EXTRACT MODEL PROBABILITY
-# ============================================================
+
 
 def _extract_probability(prediction_result):
     """
@@ -85,9 +75,8 @@ def _extract_probability(prediction_result):
         Probability between 0.0 and 1.0
     """
 
-    # --------------------------------------------------------
     # Empty result
-    # --------------------------------------------------------
+
 
     if prediction_result is None:
 
@@ -96,17 +85,17 @@ def _extract_probability(prediction_result):
         )
 
 
-    # ========================================================
+   
     # DICTIONARY RESULT
-    # ========================================================
+    
 
     if isinstance(prediction_result, dict):
 
-        # ----------------------------------------------------
+    
         # IMPORTANT:
         # This is the actual key returned by your
         # prediction_service.py
-        # ----------------------------------------------------
+
 
         possible_keys = [
 
@@ -123,9 +112,9 @@ def _extract_probability(prediction_result):
         ]
 
 
-        # ----------------------------------------------------
+      
         # Search for probability
-        # ----------------------------------------------------
+        
 
         for key in possible_keys:
 
@@ -149,12 +138,10 @@ def _extract_probability(prediction_result):
                 continue
 
 
-            # ------------------------------------------------
+           
             # If probability is supplied as percentage
-            #
-            # Example:
-            # 77.77 → 0.7777
-            # ------------------------------------------------
+            
+           
 
             if probability > 1:
 
@@ -163,9 +150,9 @@ def _extract_probability(prediction_result):
                 )
 
 
-            # ------------------------------------------------
+           
             # Validate
-            # ------------------------------------------------
+            
 
             if not 0.0 <= probability <= 1.0:
 
@@ -178,9 +165,9 @@ def _extract_probability(prediction_result):
             return probability
 
 
-        # ====================================================
+       
         # NESTED PREDICTION RESULT
-        # ====================================================
+       
 
         for nested_key in [
 
@@ -208,10 +195,9 @@ def _extract_probability(prediction_result):
                     pass
 
 
-    # ========================================================
+    
     # NUMERIC RESULT
-    # ========================================================
-
+   
     if isinstance(
         prediction_result,
         (int, float)
@@ -242,9 +228,9 @@ def _extract_probability(prediction_result):
         return probability
 
 
-    # ========================================================
+    
     # PROBABILITY NOT FOUND
-    # ========================================================
+    
 
     raise ValueError(
         "Could not find avoidability probability "
@@ -252,9 +238,9 @@ def _extract_probability(prediction_result):
     )
 
 
-# ============================================================
+
 # 4. EXTRACT BINARY PREDICTION
-# ============================================================
+
 
 def _extract_prediction(prediction_result):
     """
@@ -310,9 +296,8 @@ def _extract_prediction(prediction_result):
     return None
 
 
-# ============================================================
 # 5. MAIN NAVIGATION FUNCTION
-# ============================================================
+
 
 def navigate_patient(
     patient,
@@ -340,9 +325,9 @@ def navigate_patient(
     """
 
 
-    # ========================================================
+    
     # STEP 1 — GET CATBOOST PREDICTION
-    # ========================================================
+   
 
     if prediction_result is None:
 
@@ -364,27 +349,27 @@ def navigate_patient(
         )
 
 
-    # ========================================================
+   
     # STEP 2 — EXTRACT PROBABILITY
-    # ========================================================
+    
 
     probability = _extract_probability(
         prediction_result
     )
 
 
-    # ========================================================
+   
     # STEP 3 — EXTRACT BINARY PREDICTION
-    # ========================================================
+   
 
     prediction = _extract_prediction(
         prediction_result
     )
 
 
-    # ========================================================
+    
     # STEP 4 — GENERATE NAVIGATION
-    # ========================================================
+   
 
     navigation_result = (
         generate_navigation_recommendation(
@@ -398,9 +383,9 @@ def navigate_patient(
     )
 
 
-    # ========================================================
+   
     # STEP 5 — SAFETY CHECK
-    # ========================================================
+   
 
     if navigation_result is None:
 
@@ -420,9 +405,8 @@ def navigate_patient(
         }
 
 
-    # ========================================================
-    # STEP 6 — ADD MODEL INFORMATION
-    # ========================================================
+   #ADD MODEL INFORMATION
+    
 
     navigation_result[
         "model_prediction"
@@ -442,16 +426,13 @@ def navigate_patient(
     )
 
 
-    # ========================================================
-    # STEP 7 — RETURN FINAL RESULT
-    # ========================================================
-
+    
+    #  RETURN FINAL RESULT
+    
     return navigation_result
 
 
-# ============================================================
 # 6. BACKWARD COMPATIBILITY
-# ============================================================
 
 def generate_navigation(
     patient,
@@ -475,9 +456,9 @@ def generate_navigation(
     )
 
 
-# ============================================================
+
 # 7. TEST
-# ============================================================
+
 
 if __name__ == "__main__":
 

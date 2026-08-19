@@ -1,14 +1,3 @@
-"""
-Database validation and integrity checking for ED-Utilization-Navigator.
-
-Validates
-
-• Database file exists
-• ehr_historical_data table exists
-• current_patient_data table exists
-• Expected schema
-• Expected row count
-"""
 
 import sqlite3
 

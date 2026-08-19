@@ -1,16 +1,9 @@
-# ============================================================
-# UC07 — PREDICTION SERVICE
-# ============================================================
-
 import pandas as pd
 from pathlib import Path
 
 from catboost import CatBoostClassifier
 
-
-# ============================================================
 # 1. MODEL PATH
-# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -22,25 +15,19 @@ MODEL_FILE = (
 )
 
 
-# ============================================================
+
 # 2. LOAD MODEL ONCE
-# ============================================================
 
 model = CatBoostClassifier()
 
 model.load_model(MODEL_FILE)
 
-
-# ============================================================
 # 3. FEATURE ORDER
-# ============================================================
 
 FEATURES = [
 
-    # -------------------------
+   
     # PAST / HISTORICAL
-    # -------------------------
-
     "past_diagnosis_category_mode",
     "prior_ed_visits",
     "ed_visits_last_30_days",
@@ -50,11 +37,7 @@ FEATURES = [
     "care_management_contact_last_90_days",
     "pcp_visits_last_12_months",
     "days_since_last_pcp_visit",
-
-    # -------------------------
     # CURRENT
-    # -------------------------
-
     "age",
     "gender",
     "region",
@@ -82,10 +65,7 @@ FEATURES = [
     "has_primary_care_provider"
 ]
 
-
-# ============================================================
 # 4. CATEGORICAL FEATURES
-# ============================================================
 
 CATEGORICAL_FEATURES = [
 
@@ -110,16 +90,14 @@ CATEGORICAL_FEATURES = [
     "has_primary_care_provider"
 ]
 
-
-# ============================================================
 # 5. PREDICT FUNCTION
-# ============================================================
+
 
 def predict_patient(patient):
 
-    # --------------------------------------------------------
+    
     # Check missing features
-    # --------------------------------------------------------
+    
 
     missing_features = [
         feature
@@ -135,9 +113,9 @@ def predict_patient(patient):
         )
 
 
-    # --------------------------------------------------------
+    
     # Validate triage_acuity (must be integer 1-5)
-    # --------------------------------------------------------
+   
 
     try:
 
@@ -160,9 +138,9 @@ def predict_patient(patient):
         )
 
 
-    # --------------------------------------------------------
+    
     # Validate binary fields (must be 0 or 1)
-    # --------------------------------------------------------
+   
 
     BINARY_FIELDS = [
         "symptom_fever_chills",
@@ -185,9 +163,9 @@ def predict_patient(patient):
             )
 
 
-    # --------------------------------------------------------
+   
     # Create DataFrame
-    # --------------------------------------------------------
+  
 
     X = pd.DataFrame(
         [patient],
@@ -195,9 +173,9 @@ def predict_patient(patient):
     )
 
 
-    # --------------------------------------------------------
+    
     # Convert categorical values to strings
-    # --------------------------------------------------------
+  
 
     for column in CATEGORICAL_FEATURES:
 
@@ -208,27 +186,25 @@ def predict_patient(patient):
         )
 
 
-    # --------------------------------------------------------
+   
     # Prediction probability
-    # --------------------------------------------------------
+ 
 
     probability = float(
         model.predict_proba(X)[0][1]
     )
 
 
-    # --------------------------------------------------------
     # Prediction
-    # --------------------------------------------------------
+  
 
     prediction = int(
         probability >= 0.50
     )
 
 
-    # --------------------------------------------------------
     # Result
-    # --------------------------------------------------------
+ 
 
     return {
 
